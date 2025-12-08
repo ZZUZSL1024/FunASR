@@ -83,6 +83,41 @@ curl -X POST "http://localhost:10099/AsrCamWithIdentify" \
   3. 持续发送音频二进制帧；根据 VAD 自动切分，或通过 `is_speaking` 字段控制结束。
   4. 服务返回识别结果 JSON；当 `is_final` 为 `false` 且 `mode` 包含 `offline`/`online` 字样时代表对应阶段结果。
 
+示例（使用 `websocat` 将 WAV 音频发送到实时接口，自动加载本地声纹库）：
+```bash
+# 先在本地转换一段音频为 16k/单声道 PCM wav
+ffmpeg -i input.mp3 -ac 1 -ar 16000 input.wav
+
+# 启动实时服务后，执行：
+cat input.wav | websocat -b ws://localhost:10095
+```
+
+示例（Python，逐块发送音频并打印返回 JSON）：
+```python
+import asyncio, websockets, json
+
+async def run():
+    uri = "ws://localhost:10095"
+    async with websockets.connect(uri) as ws:
+        # 可选：发送配置
+        await ws.send(json.dumps({"chunk_size": "5,10", "mode": "2pass", "wav_name": "demo"}))
+
+        # 按块发送音频
+        with open("input.wav", "rb") as f:
+            while True:
+                chunk = f.read(3200)  # 0.2 秒 16k 16-bit 单声道 PCM
+                if not chunk:
+                    break
+                await ws.send(chunk)
+                print(await ws.recv())  # 打印中间结果
+
+        # 告知结束（可选，服务器也可通过静音检测结束）
+        await ws.send(json.dumps({"is_speaking": False}))
+        print(await ws.recv())  # 最终结果
+
+asyncio.run(run())
+```
+
 实时识别会在每次离线二次识别阶段自动加载最新的 `speaker_db.json`，将当前说话人与本地声纹库匹配。
 
 ## 共享声纹库说明

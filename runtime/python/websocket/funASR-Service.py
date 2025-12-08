@@ -21,6 +21,9 @@ from funasr import AutoModel
 
 app = Flask(__name__)
 
+# 避免中文在日志/响应中被转义为 ASCII 码
+app.config["JSON_AS_ASCII"] = False
+
 # 配置上传文件夹
 UPLOAD_FOLDER = 'uploads'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
