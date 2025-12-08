@@ -288,6 +288,8 @@ async def message(id):
             wav_name = meg.get("wav_name", "demo")
             text = meg.get("text", "")
             mode = meg.get("mode", "")
+            spk_name = meg.get("spk_name", "")
+            spk_score = meg.get("spk_score", None)
             now_ts = time.time()
 
             # === 延迟统计：第一条 online/2pass-online 文本时打印 ===
@@ -364,7 +366,16 @@ async def message(id):
                     text_print += "{} timestamp: {}".format(text, timestamp)
                 else:
                     text_print += "{}".format(text)
-                print("pid" + str(id) + ": " + wav_name + ": " + text_print)
+
+                # 如果服务端提供了说话人信息，则附带打印
+                spk_info = ""
+                if spk_name:
+                    if spk_score is not None:
+                        spk_info = f" [spk={spk_name} score={float(spk_score):.3f}]"
+                    else:
+                        spk_info = f" [spk={spk_name}]"
+
+                print("pid" + str(id) + ": " + wav_name + ": " + text_print + spk_info)
                 offline_msg_done = True
             else:
                 # 2pass 模式
@@ -375,6 +386,13 @@ async def message(id):
                     text_print_2pass_online = ""
                     text_print = text_print_2pass_offline + "{}".format(text)
                     text_print_2pass_offline += "{}".format(text)
+
+                    # 2pass 最终结果也补充说话人信息
+                    if spk_name:
+                        if spk_score is not None:
+                            text_print += f" [spk={spk_name} score={float(spk_score):.3f}]"
+                        else:
+                            text_print += f" [spk={spk_name}]"
 
                 text_print = text_print[-args.words_max_print :]
                 print("pid" + str(id) + ": " + text_print)
