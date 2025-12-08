@@ -7,6 +7,7 @@ import tracemalloc
 import numpy as np
 import argparse
 import ssl
+import os
 from scipy.spatial.distance import cosine
 from modelscope.pipelines import pipeline
 import torch
@@ -101,6 +102,18 @@ args = parser.parse_args()
 
 
 websocket_users = set()
+SPEAKER_DB_PATH = os.path.join(os.path.dirname(__file__), "speaker_db.json")
+
+
+def load_speaker_db():
+    if not os.path.exists(SPEAKER_DB_PATH):
+        return {}
+    try:
+        with open(SPEAKER_DB_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
 
 print("model loading")
 from funasr import AutoModel
@@ -363,7 +376,7 @@ async def async_asr(websocket, audio_in):
         timestamp = rec_result.get("timestamp", None)
         sentence_info = rec_result.get("sentence_info", None)
 
-        # 2. 声纹识别（你现在这一段是 OK 的，就不重复贴了）
+        # 2. 声纹识别
         spk_name = "unknown"
         best_score = 0.0
         try:
@@ -373,12 +386,12 @@ async def async_asr(websocket, audio_in):
             )[0]
             embedding = sv_out["spk_embedding"][0].cpu().numpy()
 
-            if len(speaker_db) > 0:
-                for name, ref_embedding in speaker_db.items():
+            local_speaker_db = load_speaker_db()
+            if len(local_speaker_db) > 0:
+                for name, ref_embedding in local_speaker_db.items():
                     if ref_embedding is None:
                         continue
-                    data_list = json.loads(ref_embedding)
-                    arr = np.array(data_list, dtype=np.float32)
+                    arr = np.array(ref_embedding, dtype=np.float32)
 
                     similarity = 1.0 - cosine(embedding, arr)
                     print("sv similarity with {}: {}".format(name, similarity))

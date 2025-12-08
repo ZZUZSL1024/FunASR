@@ -14,6 +14,8 @@ from modelscope.utils.constant import Tasks
 from werkzeug.utils import secure_filename
 import torch
 import os
+import json
+import numpy as np
 from openai import OpenAI
 from funasr import AutoModel
 
@@ -23,6 +25,7 @@ app = Flask(__name__)
 UPLOAD_FOLDER = 'uploads'
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
+SPEAKER_DB_PATH = os.path.join(os.path.dirname(__file__), "speaker_db.json")
 
 auto_model = AutoModel(model="damo/speech_paraformer-large-vad-punc_asr_nat-zh-cn-16k-common-vocab8404-pytorch",
                   vad_model="damo/speech_fsmn_vad_zh-cn-16k-common-pytorch",
@@ -39,6 +42,22 @@ sv_pipeline = pipeline(
                 )
 
 
+def load_speaker_db():
+    if not os.path.exists(SPEAKER_DB_PATH):
+        return {}
+    try:
+        with open(SPEAKER_DB_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
+
+
+def save_speaker_db(db):
+    os.makedirs(os.path.dirname(SPEAKER_DB_PATH), exist_ok=True)
+    with open(SPEAKER_DB_PATH, "w", encoding="utf-8") as f:
+        json.dump(db, f, ensure_ascii=False)
+
 
 # 注册声纹：传音频wav文件，实现注册音频返回音频的embedding数据
 @app.route('/Register_Speaker', methods=['POST'])
@@ -46,6 +65,10 @@ def Register_Speaker():
     # 检查文件上传
     if 'file' not in request.files:
         return jsonify({"error": "No audio file provided"}), 400
+
+    speaker_name = request.form.get('speaker_name') or request.args.get('speaker_name')
+    if not speaker_name:
+        return jsonify({"error": "speaker_name is required"}), 400
 
     file = request.files['file']
     if file.filename == '':
@@ -71,9 +94,13 @@ def Register_Speaker():
                 embedding_list = embedding.tolist()
             else:
                 embedding_list = list(embedding)
+            speaker_db = load_speaker_db()
+            speaker_db[speaker_name] = embedding_list
+            save_speaker_db(speaker_db)
             return jsonify({
                 "status": "success",
-                "result": embedding_list
+                "result": embedding_list,
+                "speaker_name": speaker_name
             })
 
     except Exception as e:
@@ -105,16 +132,21 @@ def speech_recognition_Timestamp_cam_identify_speakers():
     identify_speakers = json.loads(identify_speakers_str.lower())  # 转为bool
 
     # 读取speaker_db（默认空字典）
+    speaker_db = load_speaker_db()
     speaker_db_str = request.form.get('speaker_db', '{}')
-    speaker_db = json.loads(speaker_db_str)
+    try:
+        provided_db = json.loads(speaker_db_str)
+        if isinstance(provided_db, dict):
+            speaker_db.update(provided_db)
+    except Exception:
+        pass
 
     # 3. 验证声纹库（如果需要对比）
-    if identify_speakers:
-        if not isinstance(speaker_db, dict) or len(speaker_db) == 0:
-            return jsonify({
-                "status": "error",
-                "result": "声纹库为空或格式错误，无法进行对比"
-            }), 400
+    if identify_speakers and (not isinstance(speaker_db, dict) or len(speaker_db) == 0):
+        return jsonify({
+            "status": "error",
+            "result": "声纹库为空或格式错误，无法进行对比"
+        }), 400
     try:
         # 执行语音识别
         result = auto_model.generate(input=filepath,
@@ -163,7 +195,6 @@ def _extract_audio_segment(audio_path, start_sec, end_sec):
 
     return temp_path
 # 是否使用声纹转化的结果处理
-import json
 def process_cam_result_with_identify_speakers(result,speaker_db,filepath,identify_speakers=False,threshold=0.45):
     """处理ASR结果，返回包含时间和内容的JSON对象列表"""
     if not isinstance(result, list) or len(result) == 0:
@@ -210,7 +241,10 @@ def process_cam_result_with_identify_speakers(result,speaker_db,filepath,identif
 
                 for name, db_emb in speaker_db.items():
                     # 计算余弦相似度
-                    data_list = json.loads(db_emb)
+                    if isinstance(db_emb, str):
+                        data_list = json.loads(db_emb)
+                    else:
+                        data_list = db_emb
                     arr = np.array(data_list, dtype=np.float32)
                     similarity = 1 - cosine(result_b, arr)
                     similarity = float(similarity)
@@ -241,7 +275,10 @@ def process_cam_result_with_identify_speakers(result,speaker_db,filepath,identif
 
         for name, db_emb in speaker_db.items():
             # 计算余弦相似度
-            data_list = json.loads(db_emb)
+            if isinstance(db_emb, str):
+                data_list = json.loads(db_emb)
+            else:
+                data_list = db_emb
             arr = np.array(data_list, dtype=np.float32)
             similarity = 1 - cosine(result_b, arr)
             similarity = float(similarity)
@@ -261,7 +298,6 @@ def process_cam_result_with_identify_speakers(result,speaker_db,filepath,identif
 
 
 from scipy.spatial.distance import cosine
-import numpy as np
 @app.route('/calculate_similarity', methods=['POST'])
 def calculate_similarity():
     """计算两个特征向量的余弦相似度"""
