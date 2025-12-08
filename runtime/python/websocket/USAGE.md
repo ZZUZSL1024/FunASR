@@ -99,6 +99,19 @@ python funasr_wss_client.py \
 - 可以通过 `--hotword`、`--chunk_size`、`--use_itn` 等参数调整；脚本会自动按块发送音频并打印返回 JSON。
 - 如需 TLS 连接，将 `--ssl` 设为 `1` 并在服务端提供证书。
 
+#### 用麦克风即说即测
+不指定 `--audio_in` 即默认用麦克风采集音频并推流，方便现场演示：
+
+```bash
+pip install pyaudio  # 首次使用麦克风需安装依赖
+
+cd runtime/python/websocket
+python funasr_wss_client.py --host localhost --port 10095 --mode 2pass
+```
+
+- 进入后即可开口说话，脚本会持续推流并打印返回的实时/最终转写。
+- 按 `Ctrl+C` 结束；如需调整分块大小或热词，可添加 `--chunk_size "5,10,5" --hotword 热词.txt`。
+
 示例（使用 `websocat` 将 WAV 音频发送到实时接口，自动加载本地声纹库）：
 ```bash
 # 先在本地转换一段音频为 16k/单声道 PCM wav

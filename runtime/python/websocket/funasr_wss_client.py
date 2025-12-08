@@ -28,7 +28,12 @@ parser.add_argument(
     default="",
     help="hotword file path, one hotword perline (e.g.:阿里巴巴 20)",
 )
-parser.add_argument("--audio_in", type=str, default=None, help="audio_in")
+parser.add_argument(
+    "--audio_in",
+    type=str,
+    default=None,
+    help="音频输入路径；不传则使用麦克风（需安装 PyAudio）",
+)
 parser.add_argument("--audio_fs", type=int, default=16000, help="audio_fs")
 parser.add_argument(
     "--send_without_sleep",
@@ -65,7 +70,12 @@ if args.output_dir is not None:
 async def record_microphone():
     """从麦克风实时录音发送到服务端（一般单路测试使用）"""
     is_finished = False
-    import pyaudio
+    try:
+        import pyaudio
+    except ImportError as e:
+        raise ImportError(
+            "缺少 PyAudio，麦克风推流前请先运行 `pip install pyaudio`"
+        ) from e
 
     global voices
     FORMAT = pyaudio.paInt16
