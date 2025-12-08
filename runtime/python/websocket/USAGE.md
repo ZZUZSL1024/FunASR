@@ -83,6 +83,22 @@ curl -X POST "http://localhost:10099/AsrCamWithIdentify" \
   3. 持续发送音频二进制帧；根据 VAD 自动切分，或通过 `is_speaking` 字段控制结束。
   4. 服务返回识别结果 JSON；当 `is_final` 为 `false` 且 `mode` 包含 `offline`/`online` 字样时代表对应阶段结果。
 
+### 方式一：使用自带客户端脚本
+`funasr_wss_client.py` 是示例调用脚本（不是服务端）。在已经启动 `funasr_wss_server.py` 后运行：
+
+```bash
+cd runtime/python/websocket
+python funasr_wss_client.py \
+  --host localhost \
+  --port 10095 \
+  --audio_in /path/to/input.wav \
+  --mode 2pass
+```
+
+- `--audio_in` 支持 WAV/PCM，或 `.scp` 文件批量压测。
+- 可以通过 `--hotword`、`--chunk_size`、`--use_itn` 等参数调整；脚本会自动按块发送音频并打印返回 JSON。
+- 如需 TLS 连接，将 `--ssl` 设为 `1` 并在服务端提供证书。
+
 示例（使用 `websocat` 将 WAV 音频发送到实时接口，自动加载本地声纹库）：
 ```bash
 # 先在本地转换一段音频为 16k/单声道 PCM wav

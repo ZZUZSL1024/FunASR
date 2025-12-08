@@ -62,20 +62,29 @@ def save_speaker_db(db):
         json.dump(db, f, ensure_ascii=False)
 
 
+def make_json_response(data, status=200):
+    """Return JSON with ensure_ascii=False so 控制台/客户端都能看到中文"""
+    return app.response_class(
+        response=json.dumps(data, ensure_ascii=False),
+        status=status,
+        mimetype="application/json",
+    )
+
+
 # 注册声纹：传音频wav文件，实现注册音频返回音频的embedding数据
 @app.route('/Register_Speaker', methods=['POST'])
 def Register_Speaker():
     # 检查文件上传
     if 'file' not in request.files:
-        return jsonify({"error": "No audio file provided"}), 400
+        return make_json_response({"error": "No audio file provided"}, 400)
 
     speaker_name = request.form.get('speaker_name') or request.args.get('speaker_name')
     if not speaker_name:
-        return jsonify({"error": "speaker_name is required"}), 400
+        return make_json_response({"error": "speaker_name is required"}, 400)
 
     file = request.files['file']
     if file.filename == '':
-        return jsonify({"error": "Empty filename"}), 400
+        return make_json_response({"error": "Empty filename"}, 400)
 
     # 保存上传文件
     filename = secure_filename(file.filename)
@@ -88,7 +97,7 @@ def Register_Speaker():
         # 删除临时文件
         os.remove(filepath)
         if len(embedding) == 0:
-            return jsonify({
+            return make_json_response({
                 "status": "error",
                 "result": "音频解析结果为空"
             })
@@ -100,7 +109,7 @@ def Register_Speaker():
             speaker_db = load_speaker_db()
             speaker_db[speaker_name] = embedding_list
             save_speaker_db(speaker_db)
-            return jsonify({
+            return make_json_response({
                 "status": "success",
                 "result": embedding_list,
                 "speaker_name": speaker_name
@@ -112,18 +121,18 @@ def Register_Speaker():
         print(f"错误信息: {str(e)}")
         if os.path.exists(filepath):
             os.remove(filepath)
-        return jsonify({"error": str(e)}), 500
+        return make_json_response({"error": str(e)}, 500)
 
 # 会议撰写
 @app.route('/AsrCamWithIdentify', methods=['POST'])
 def speech_recognition_Timestamp_cam_identify_speakers():
     # 检查文件上传
     if 'file' not in request.files:
-        return jsonify({"error": "No audio file provided"}), 400
+        return make_json_response({"error": "No audio file provided"}, 400)
 
     file = request.files['file']
     if file.filename == '':
-        return jsonify({"error": "Empty filename"}), 400
+        return make_json_response({"error": "Empty filename"}, 400)
 
     # 保存上传文件
     filename = secure_filename(file.filename)
@@ -146,10 +155,10 @@ def speech_recognition_Timestamp_cam_identify_speakers():
 
     # 3. 验证声纹库（如果需要对比）
     if identify_speakers and (not isinstance(speaker_db, dict) or len(speaker_db) == 0):
-        return jsonify({
+        return make_json_response({
             "status": "error",
             "result": "声纹库为空或格式错误，无法进行对比"
-        }), 400
+        }, 400)
     try:
         # 执行语音识别
         result = auto_model.generate(input=filepath,
@@ -162,12 +171,14 @@ def speech_recognition_Timestamp_cam_identify_speakers():
 
         os.remove(filepath)
         if len(processed_result) == 0:
-            return jsonify({
+            return make_json_response({
                 "status": "error",
                 "result": "音频解析结果为空"
             })
         else:
-            return jsonify({
+            # 控制台打印时保持中文不被转义
+            print(json.dumps(processed_result, ensure_ascii=False, indent=2))
+            return make_json_response({
                 "status": "success",
                 "result": processed_result
             })
@@ -178,7 +189,7 @@ def speech_recognition_Timestamp_cam_identify_speakers():
         print(f"错误信息: {str(e)}")
         if os.path.exists(filepath):
             os.remove(filepath)
-        return jsonify({"error": str(e)}), 500
+        return make_json_response({"error": str(e)}, 500)
 
 import torchaudio
 def _extract_audio_segment(audio_path, start_sec, end_sec):
@@ -308,7 +319,7 @@ def calculate_similarity():
     emb1 = np.array(data['emb1'], dtype=np.float32)
     emb2 = np.array(data['emb2'], dtype=np.float32)
     print(1-cosine(emb1,emb2))
-    return jsonify({
+    return make_json_response({
                 "status": "success",
                 "result": float(1 - cosine(emb1, emb2))
             })
