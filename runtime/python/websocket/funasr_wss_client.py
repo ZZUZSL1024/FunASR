@@ -358,14 +358,15 @@ async def message(id):
 
             # ===== 单路模式输出：保留原来那种“滚动文本”的体验，但更规整 =====
             if meg["mode"] == "online":
-                text_print += "{}".format(text)
+                # 服务端的 online 文本通常是全量覆盖式输出，这里改为直接覆盖，避免重复标点
+                text_print = "{}".format(text)
                 text_print = text_print[-args.words_max_print :]
                 print("pid" + str(id) + ": " + text_print)
             elif meg["mode"] == "offline":
                 if timestamp != "":
-                    text_print += "{} timestamp: {}".format(text, timestamp)
+                    text_print = "{} timestamp: {}".format(text, timestamp)
                 else:
-                    text_print += "{}".format(text)
+                    text_print = "{}".format(text)
 
                 # 如果服务端提供了说话人信息，则附带打印
                 spk_info = ""
@@ -380,12 +381,14 @@ async def message(id):
             else:
                 # 2pass 模式
                 if meg["mode"] == "2pass-online":
-                    text_print_2pass_online += "{}".format(text)
+                    # 2pass-online 一般返回最新的完整文本，覆盖即可，避免标点重复累加
+                    text_print_2pass_online = "{}".format(text)
                     text_print = text_print_2pass_offline + text_print_2pass_online
                 else:
                     text_print_2pass_online = ""
                     text_print = text_print_2pass_offline + "{}".format(text)
-                    text_print_2pass_offline += "{}".format(text)
+                    # 最终结果覆盖，保持与服务端一致
+                    text_print_2pass_offline = "{}".format(text)
 
                     # 2pass 最终结果也补充说话人信息
                     if spk_name:
