@@ -84,6 +84,12 @@ parser.add_argument("--ngpu", type=int, default=1, help="0 for cpu, 1 for gpu")
 parser.add_argument("--device", type=str, default="cuda", help="cuda, cpu")
 parser.add_argument("--ncpu", type=int, default=4, help="cpu cores")
 parser.add_argument(
+    "--energy_threshold",
+    type=float,
+    default=300.0,
+    help="Minimum RMS energy (int16) to accept a chunk; lower audio is treated as silence to limit pickup range",
+)
+parser.add_argument(
     "--certfile",
     type=str,
     default="../../ssl_key/server.crt",
@@ -235,6 +241,7 @@ async def ws_serve(websocket, path):
     websocket.status_dict_punc = {"cache": {}}
     websocket.chunk_interval = 10
     websocket.vad_pre_idx = 0
+    websocket.energy_threshold = float(args.energy_threshold)
     speech_start = False
     speech_end_i = -1
     websocket.wav_name = "microphone"
@@ -273,6 +280,12 @@ async def ws_serve(websocket, path):
                     print(f"热词已更新: {hotword_data}")
                 if "mode" in messagejson:
                     websocket.mode = messagejson["mode"]
+                if "energy_threshold" in messagejson:
+                    try:
+                        websocket.energy_threshold = float(messagejson["energy_threshold"])
+                        print(f"energy threshold updated to {websocket.energy_threshold}")
+                    except Exception:
+                        print(f"invalid energy_threshold value: {messagejson.get('energy_threshold')}")
 
 
             websocket.status_dict_vad["chunk_size"] = int(
@@ -280,6 +293,17 @@ async def ws_serve(websocket, path):
             )
             if len(frames_asr_online) > 0 or len(frames_asr) >= 0 or not isinstance(message, str):
                 if not isinstance(message, str):
+                    try:
+                        audio_array = np.frombuffer(message, dtype=np.int16).astype(np.float32)
+                        rms_energy = float(np.sqrt(np.mean(np.square(audio_array)))) if audio_array.size else 0.0
+                    except Exception:
+                        rms_energy = 0.0
+
+                    if rms_energy < websocket.energy_threshold:
+                        duration_ms = len(message) // 32
+                        websocket.vad_pre_idx += duration_ms
+                        continue
+
                     frames.append(message)
                     duration_ms = len(message) // 32
                     websocket.vad_pre_idx += duration_ms

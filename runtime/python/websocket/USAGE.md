@@ -39,6 +39,8 @@ python funasr_wss_server.py
 如需启用 TLS，可通过 `--certfile` 和 `--keyfile` 指定证书，或调整端口、设备等参数：
 ```bash
 python funasr_wss_server.py --port 10095 --device cuda --ngpu 1
+# 将拾音范围收窄（忽略低能量语音，可减少远处语音误触发）：
+python funasr_wss_server.py --energy_threshold 600
 ```
 
 ## 声纹注册接口
@@ -80,6 +82,7 @@ curl -X POST "http://localhost:10099/AsrCamWithIdentify" \
      ```json
      {"chunk_size": "5,10", "mode": "2pass", "wav_name": "demo"}
      ```
+     - 如需在运行期继续缩小拾音范围，可以在这里加上 `"energy_threshold": 600` 等数值（单位：RMS，`int16` 量级）。
   3. 持续发送音频二进制帧；根据 VAD 自动切分，或通过 `is_speaking` 字段控制结束。
   4. 服务返回识别结果 JSON；当 `is_final` 为 `false` 且 `mode` 包含 `offline`/`online` 字样时代表对应阶段结果。
 
