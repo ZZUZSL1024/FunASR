@@ -28,7 +28,12 @@ parser.add_argument(
     default="",
     help="hotword file path, one hotword perline (e.g.:阿里巴巴 20)",
 )
-parser.add_argument("--audio_in", type=str, default=None, help="audio_in")
+parser.add_argument(
+    "--audio_in",
+    type=str,
+    default=None,
+    help="音频输入路径；不传则使用麦克风（需安装 PyAudio）",
+)
 parser.add_argument("--audio_fs", type=int, default=16000, help="audio_fs")
 parser.add_argument(
     "--send_without_sleep",
@@ -65,7 +70,12 @@ if args.output_dir is not None:
 async def record_microphone():
     """从麦克风实时录音发送到服务端（一般单路测试使用）"""
     is_finished = False
-    import pyaudio
+    try:
+        import pyaudio
+    except ImportError as e:
+        raise ImportError(
+            "缺少 PyAudio，麦克风推流前请先运行 `pip install pyaudio`"
+        ) from e
 
     global voices
     FORMAT = pyaudio.paInt16
@@ -278,6 +288,8 @@ async def message(id):
             wav_name = meg.get("wav_name", "demo")
             text = meg.get("text", "")
             mode = meg.get("mode", "")
+            spk_name = meg.get("spk_name", "")
+            spk_score = meg.get("spk_score", None)
             now_ts = time.time()
 
             # === 延迟统计：第一条 online/2pass-online 文本时打印 ===
@@ -346,25 +358,44 @@ async def message(id):
 
             # ===== 单路模式输出：保留原来那种“滚动文本”的体验，但更规整 =====
             if meg["mode"] == "online":
-                text_print += "{}".format(text)
+                # 服务端的 online 文本通常是全量覆盖式输出，这里改为直接覆盖，避免重复标点
+                text_print = "{}".format(text)
                 text_print = text_print[-args.words_max_print :]
                 print("pid" + str(id) + ": " + text_print)
             elif meg["mode"] == "offline":
                 if timestamp != "":
-                    text_print += "{} timestamp: {}".format(text, timestamp)
+                    text_print = "{} timestamp: {}".format(text, timestamp)
                 else:
-                    text_print += "{}".format(text)
-                print("pid" + str(id) + ": " + wav_name + ": " + text_print)
+                    text_print = "{}".format(text)
+
+                # 如果服务端提供了说话人信息，则附带打印
+                spk_info = ""
+                if spk_name:
+                    if spk_score is not None:
+                        spk_info = f" [spk={spk_name} score={float(spk_score):.3f}]"
+                    else:
+                        spk_info = f" [spk={spk_name}]"
+
+                print("pid" + str(id) + ": " + wav_name + ": " + text_print + spk_info)
                 offline_msg_done = True
             else:
                 # 2pass 模式
                 if meg["mode"] == "2pass-online":
-                    text_print_2pass_online += "{}".format(text)
+                    # 2pass-online 一般返回最新的完整文本，覆盖即可，避免标点重复累加
+                    text_print_2pass_online = "{}".format(text)
                     text_print = text_print_2pass_offline + text_print_2pass_online
                 else:
                     text_print_2pass_online = ""
                     text_print = text_print_2pass_offline + "{}".format(text)
-                    text_print_2pass_offline += "{}".format(text)
+                    # 最终结果覆盖，保持与服务端一致
+                    text_print_2pass_offline = "{}".format(text)
+
+                    # 2pass 最终结果也补充说话人信息
+                    if spk_name:
+                        if spk_score is not None:
+                            text_print += f" [spk={spk_name} score={float(spk_score):.3f}]"
+                        else:
+                            text_print += f" [spk={spk_name}]"
 
                 text_print = text_print[-args.words_max_print :]
                 print("pid" + str(id) + ": " + text_print)

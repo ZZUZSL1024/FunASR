@@ -7,6 +7,7 @@ import tracemalloc
 import numpy as np
 import argparse
 import ssl
+import os
 from scipy.spatial.distance import cosine
 from modelscope.pipelines import pipeline
 import torch
@@ -83,6 +84,12 @@ parser.add_argument("--ngpu", type=int, default=1, help="0 for cpu, 1 for gpu")
 parser.add_argument("--device", type=str, default="cuda", help="cuda, cpu")
 parser.add_argument("--ncpu", type=int, default=4, help="cpu cores")
 parser.add_argument(
+    "--energy_threshold",
+    type=float,
+    default=300.0,
+    help="Minimum RMS energy (int16) to accept a chunk; lower audio is treated as silence to limit pickup range",
+)
+parser.add_argument(
     "--certfile",
     type=str,
     default="../../ssl_key/server.crt",
@@ -101,6 +108,18 @@ args = parser.parse_args()
 
 
 websocket_users = set()
+SPEAKER_DB_PATH = os.path.join(os.path.dirname(__file__), "speaker_db.json")
+
+
+def load_speaker_db():
+    if not os.path.exists(SPEAKER_DB_PATH):
+        return {}
+    try:
+        with open(SPEAKER_DB_PATH, "r", encoding="utf-8") as f:
+            data = json.load(f)
+            return data if isinstance(data, dict) else {}
+    except Exception:
+        return {}
 
 print("model loading")
 from funasr import AutoModel
@@ -222,6 +241,7 @@ async def ws_serve(websocket, path):
     websocket.status_dict_punc = {"cache": {}}
     websocket.chunk_interval = 10
     websocket.vad_pre_idx = 0
+    websocket.energy_threshold = float(args.energy_threshold)
     speech_start = False
     speech_end_i = -1
     websocket.wav_name = "microphone"
@@ -260,6 +280,12 @@ async def ws_serve(websocket, path):
                     print(f"热词已更新: {hotword_data}")
                 if "mode" in messagejson:
                     websocket.mode = messagejson["mode"]
+                if "energy_threshold" in messagejson:
+                    try:
+                        websocket.energy_threshold = float(messagejson["energy_threshold"])
+                        print(f"energy threshold updated to {websocket.energy_threshold}")
+                    except Exception:
+                        print(f"invalid energy_threshold value: {messagejson.get('energy_threshold')}")
 
 
             websocket.status_dict_vad["chunk_size"] = int(
@@ -267,6 +293,17 @@ async def ws_serve(websocket, path):
             )
             if len(frames_asr_online) > 0 or len(frames_asr) >= 0 or not isinstance(message, str):
                 if not isinstance(message, str):
+                    try:
+                        audio_array = np.frombuffer(message, dtype=np.int16).astype(np.float32)
+                        rms_energy = float(np.sqrt(np.mean(np.square(audio_array)))) if audio_array.size else 0.0
+                    except Exception:
+                        rms_energy = 0.0
+
+                    if rms_energy < websocket.energy_threshold:
+                        duration_ms = len(message) // 32
+                        websocket.vad_pre_idx += duration_ms
+                        continue
+
                     frames.append(message)
                     duration_ms = len(message) // 32
                     websocket.vad_pre_idx += duration_ms
@@ -363,7 +400,7 @@ async def async_asr(websocket, audio_in):
         timestamp = rec_result.get("timestamp", None)
         sentence_info = rec_result.get("sentence_info", None)
 
-        # 2. 声纹识别（你现在这一段是 OK 的，就不重复贴了）
+        # 2. 声纹识别
         spk_name = "unknown"
         best_score = 0.0
         try:
@@ -373,12 +410,12 @@ async def async_asr(websocket, audio_in):
             )[0]
             embedding = sv_out["spk_embedding"][0].cpu().numpy()
 
-            if len(speaker_db) > 0:
-                for name, ref_embedding in speaker_db.items():
+            local_speaker_db = load_speaker_db()
+            if len(local_speaker_db) > 0:
+                for name, ref_embedding in local_speaker_db.items():
                     if ref_embedding is None:
                         continue
-                    data_list = json.loads(ref_embedding)
-                    arr = np.array(data_list, dtype=np.float32)
+                    arr = np.array(ref_embedding, dtype=np.float32)
 
                     similarity = 1.0 - cosine(embedding, arr)
                     print("sv similarity with {}: {}".format(name, similarity))

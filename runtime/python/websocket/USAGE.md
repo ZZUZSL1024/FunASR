@@ -1,0 +1,158 @@
+# Websocket & REST 服务启动与调用指南
+
+本文档说明如何启动离线转写/声纹注册（Flask HTTP）服务，以及实时转写（WebSocket）服务，并演示如何让两套服务共用本地声纹库。
+
+## 目录
+- [环境准备](#环境准备)
+- [启动离线转写与声纹注册服务](#启动离线转写与声纹注册服务)
+- [启动实时转写服务](#启动实时转写服务)
+- [声纹注册接口](#声纹注册接口)
+- [离线转写接口](#离线转写接口)
+- [实时转写接口](#实时转写接口)
+- [共享声纹库说明](#共享声纹库说明)
+
+## 环境准备
+1. 安装依赖（建议已安装 `pip`）：
+   ```bash
+   pip install -r requirements.txt
+   ```
+2. 确保 GPU 环境正确（如无 GPU 会自动使用 CPU）。
+
+## 启动离线转写与声纹注册服务
+该服务提供 HTTP 接口，默认监听 `0.0.0.0:10099`。
+
+```bash
+cd runtime/python/websocket
+python funASR-Service.py
+```
+
+启动后会自动创建 `uploads/` 目录用于临时存储上传的音频，并在当前目录生成共享声纹库文件 `speaker_db.json`。
+
+## 启动实时转写服务
+实时转写通过 WebSocket 提供，默认监听 `0.0.0.0:10095`。
+
+```bash
+cd runtime/python/websocket
+python funasr_wss_server.py
+```
+
+如需启用 TLS，可通过 `--certfile` 和 `--keyfile` 指定证书，或调整端口、设备等参数：
+```bash
+python funasr_wss_server.py --port 10095 --device cuda --ngpu 1
+# 将拾音范围收窄（忽略低能量语音，可减少远处语音误触发）：
+python funasr_wss_server.py --energy_threshold 600
+```
+
+## 声纹注册接口
+- **URL**: `POST http://<host>:10099/Register_Speaker`
+- **参数**:
+  - `file`：必填，WAV/MP3 等音频文件（`form-data` 文件字段）。
+  - `speaker_name`：必填，声纹在本地库中的名称。
+- **返回**: `status`、`speaker_name`、`result`（向量列表）。
+
+示例：
+```bash
+curl -X POST "http://localhost:10099/Register_Speaker" \
+  -F "file=@/path/to/audio.wav" \
+  -F "speaker_name=alice"
+```
+
+调用成功后，声纹向量会追加到 `speaker_db.json`，供后续离线/实时识别使用。
+
+## 离线转写接口
+- **URL**: `POST http://<host>:10099/AsrCamWithIdentify`
+- **参数**:
+  - `file`：必填，待转写音频文件。
+  - `identify_speakers`：可选，`true`/`false`（字符串），开启后会对输出句子进行声纹匹配。
+  - `speaker_db`：可选，JSON 字典字符串。如不传，则自动使用本地 `speaker_db.json`；传入可在已有库基础上追加/覆盖。
+- **返回**: `status`、`result`（包含时间戳、文本、匹配到的 `spk_name` 与相似度）。
+
+示例（使用本地声纹库比对）：
+```bash
+curl -X POST "http://localhost:10099/AsrCamWithIdentify" \
+  -F "file=@/path/to/meeting.wav" \
+  -F "identify_speakers=true"
+```
+
+## 实时转写接口
+- **URL**: `ws://<host>:10095`（默认端口，可根据启动参数调整）
+- **交互流程**:
+  1. 建立 WebSocket 连接。
+  2. 发送 JSON 设定参数（可选），如：
+     ```json
+     {"chunk_size": "5,10", "mode": "2pass", "wav_name": "demo"}
+     ```
+     - 如需在运行期继续缩小拾音范围，可以在这里加上 `"energy_threshold": 600` 等数值（单位：RMS，`int16` 量级）。
+  3. 持续发送音频二进制帧；根据 VAD 自动切分，或通过 `is_speaking` 字段控制结束。
+  4. 服务返回识别结果 JSON；当 `is_final` 为 `false` 且 `mode` 包含 `offline`/`online` 字样时代表对应阶段结果。
+
+### 方式一：使用自带客户端脚本
+`funasr_wss_client.py` 是示例调用脚本（不是服务端）。在已经启动 `funasr_wss_server.py` 后运行：
+
+```bash
+cd runtime/python/websocket
+python funasr_wss_client.py \
+  --host localhost \
+  --port 10095 \
+  --audio_in /path/to/input.wav \
+  --mode 2pass
+```
+
+- `--audio_in` 支持 WAV/PCM，或 `.scp` 文件批量压测。
+- 可以通过 `--hotword`、`--chunk_size`、`--use_itn` 等参数调整；脚本会自动按块发送音频并打印返回 JSON。
+- 如需 TLS 连接，将 `--ssl` 设为 `1` 并在服务端提供证书。
+
+#### 用麦克风即说即测
+不指定 `--audio_in` 即默认用麦克风采集音频并推流，方便现场演示：
+
+```bash
+pip install pyaudio  # 首次使用麦克风需安装依赖
+
+cd runtime/python/websocket
+python funasr_wss_client.py --host localhost --port 10095 --mode 2pass
+```
+
+- 进入后即可开口说话，脚本会持续推流并打印返回的实时/最终转写。
+- 按 `Ctrl+C` 结束；如需调整分块大小或热词，可添加 `--chunk_size "5,10,5" --hotword 热词.txt`。
+
+示例（使用 `websocat` 将 WAV 音频发送到实时接口，自动加载本地声纹库）：
+```bash
+# 先在本地转换一段音频为 16k/单声道 PCM wav
+ffmpeg -i input.mp3 -ac 1 -ar 16000 input.wav
+
+# 启动实时服务后，执行：
+cat input.wav | websocat -b ws://localhost:10095
+```
+
+示例（Python，逐块发送音频并打印返回 JSON）：
+```python
+import asyncio, websockets, json
+
+async def run():
+    uri = "ws://localhost:10095"
+    async with websockets.connect(uri) as ws:
+        # 可选：发送配置
+        await ws.send(json.dumps({"chunk_size": "5,10", "mode": "2pass", "wav_name": "demo"}))
+
+        # 按块发送音频
+        with open("input.wav", "rb") as f:
+            while True:
+                chunk = f.read(3200)  # 0.2 秒 16k 16-bit 单声道 PCM
+                if not chunk:
+                    break
+                await ws.send(chunk)
+                print(await ws.recv())  # 打印中间结果
+
+        # 告知结束（可选，服务器也可通过静音检测结束）
+        await ws.send(json.dumps({"is_speaking": False}))
+        print(await ws.recv())  # 最终结果
+
+asyncio.run(run())
+```
+
+实时识别会在每次离线二次识别阶段自动加载最新的 `speaker_db.json`，将当前说话人与本地声纹库匹配。
+
+## 共享声纹库说明
+- 声纹库文件路径：`runtime/python/websocket/speaker_db.json`。
+- 注册接口会写入/追加；实时与离线接口使用时自动读取最新版本。
+- 如需手工维护，可直接编辑 JSON 中的 `{"speaker_name": [embedding...]}` 映射，但建议通过注册接口写入。
