@@ -187,7 +187,7 @@ async def record_microphone():
 
 async def record_from_scp(chunk_begin, chunk_size):
     """从 wav/scp 文件读取音频分片发送，用于压测和延迟测试"""
-    global voices, latency_first_audio_time, latency_last_audio_time
+    global voices, latency_first_audio_time, latency_last_audio_time, offline_msg_done
     if args.audio_in.endswith(".scp"):
         f_scp = open(args.audio_in)
         wavs = f_scp.readlines()
@@ -225,6 +225,9 @@ async def record_from_scp(chunk_begin, chunk_size):
         wavs = wavs[chunk_begin: chunk_begin + chunk_size]
 
     for wav in wavs:
+        # 每个音频独立等待 is_final，避免上一段已结束导致后续离线段提前关闭连接
+        offline_msg_done = False
+
         wav_splits = wav.strip().split()
 
         wav_name = wav_splits[0] if len(wav_splits) > 1 else "demo"
