@@ -59,17 +59,7 @@ args = parser.parse_args()
 args.chunk_size = [int(x) for x in args.chunk_size.split(",")]
 print(args)
 
-from queue import Queue
 from datetime import datetime
-
-voices = Queue()
-offline_msg_done = False
-
-# === 延迟统计相关：对每个 wav_name 记录首包/末包发送时间 & 是否已经打印过延迟 ===
-latency_first_audio_time = {}      # {wav_name: t_first_chunk_send}
-latency_last_audio_time = {}       # {wav_name: t_last_chunk_send}
-latency_first_text_printed = {}    # {wav_name: bool}
-
 
 def _iso(ts: float) -> str:
     return datetime.fromtimestamp(ts).strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
@@ -119,7 +109,7 @@ if args.output_dir is not None:
         os.makedirs(args.output_dir)
 
 
-async def record_microphone():
+async def record_microphone(websocket):
     """从麦克风实时录音发送到服务端（一般单路测试使用）"""
     try:
         import pyaudio
@@ -185,9 +175,8 @@ async def record_microphone():
         await asyncio.sleep(0.01)
 
 
-async def record_from_scp(chunk_begin, chunk_size):
+async def record_from_scp(websocket, chunk_begin, chunk_size, offline_done_event, latency_first_audio_time, latency_last_audio_time, latency_first_text_printed):
     """从 wav/scp 文件读取音频分片发送，用于压测和延迟测试"""
-    global voices, latency_first_audio_time, latency_last_audio_time
     if args.audio_in.endswith(".scp"):
         f_scp = open(args.audio_in)
         wavs = f_scp.readlines()
@@ -305,18 +294,14 @@ async def record_from_scp(chunk_begin, chunk_size):
         await asyncio.sleep(2)
 
     if args.mode == "offline":
-        global offline_msg_done
-        while not offline_msg_done:
-            await asyncio.sleep(1)
+        await offline_done_event.wait()
 
     await websocket.close()
 
 
-async def message(id, writer: MeetingWriter):
+async def message(websocket, id, writer: MeetingWriter, offline_done_event, latency_first_audio_time, latency_last_audio_time, latency_first_text_printed):
     """接收服务端识别结果 + 打印实时文本 + 打印延迟 + 写验收日志(events.jsonl)"""
     import websockets
-    global websocket, voices, offline_msg_done
-    global latency_first_audio_time, latency_last_audio_time, latency_first_text_printed
 
     multi_mode = args.thread_num > 1  # 多路并发时，打印风格更简洁
     text_print = ""
@@ -369,7 +354,8 @@ async def message(id, writer: MeetingWriter):
                         )
 
             timestamp = meg.get("timestamp", "")
-            offline_msg_done = meg.get("is_final", False)
+            if meg.get("is_final"):
+                offline_done_event.set()
 
             # ✅ 验收友好：每条消息落 events.jsonl（便于后处理）
             event = {
@@ -435,7 +421,7 @@ async def message(id, writer: MeetingWriter):
                         spk_info = f" [spk={spk_name}]"
 
                 print("pid" + str(id) + ": " + wav_name + ": " + text_print + spk_info)
-                offline_msg_done = True
+                offline_done_event.set()
 
             else:
                 # 2pass 模式
@@ -473,11 +459,12 @@ async def ws_client(id, chunk_begin, chunk_size):
     if args.audio_in is None:
         chunk_begin = 0
         chunk_size = 1
-    global websocket, voices, offline_msg_done
 
     for i in range(chunk_begin, chunk_begin + chunk_size):
-        offline_msg_done = False
-        voices = Queue()
+        offline_done_event = asyncio.Event()
+        latency_first_audio_time = {}
+        latency_last_audio_time = {}
+        latency_first_text_printed = {}
 
         if args.ssl == 1:
             ssl_context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
@@ -497,10 +484,30 @@ async def ws_client(id, chunk_begin, chunk_size):
             writer = MeetingWriter(args.log_dir, meeting_id=meeting_tag, flush_every=args.log_flush_every)
             try:
                 if args.audio_in is not None:
-                    task = asyncio.create_task(record_from_scp(i, 1))
+                    task = asyncio.create_task(
+                        record_from_scp(
+                            websocket,
+                            i,
+                            1,
+                            offline_done_event,
+                            latency_first_audio_time,
+                            latency_last_audio_time,
+                            latency_first_text_printed,
+                        )
+                    )
                 else:
-                    task = asyncio.create_task(record_microphone())
-                task3 = asyncio.create_task(message(str(id) + "_" + str(i), writer))  # processid+fileid
+                    task = asyncio.create_task(record_microphone(websocket))
+                task3 = asyncio.create_task(
+                    message(
+                        websocket,
+                        str(id) + "_" + str(i),
+                        writer,
+                        offline_done_event,
+                        latency_first_audio_time,
+                        latency_last_audio_time,
+                        latency_first_text_printed,
+                    )
+                )  # processid+fileid
                 await asyncio.gather(task, task3)
             finally:
                 writer.close()
