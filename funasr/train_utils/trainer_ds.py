@@ -16,6 +16,7 @@ from funasr.train_utils.recursive_op import recursive_average
 from funasr.train_utils.average_nbest_models import average_checkpoints
 from torch.distributed.fsdp.sharded_grad_scaler import ShardedGradScaler
 import funasr.utils.misc as misc_utils
+from funasr.models.lora.utils import lora_state_dict
 
 try:
     import wandb
@@ -161,6 +162,8 @@ class Trainer:
             if isinstance(effective_save_name_excludes, str):
                 effective_save_name_excludes = effective_save_name_excludes.split(",")
         self.effective_save_name_excludes = effective_save_name_excludes
+        self.lora_save_only = kwargs.get("lora_save_only", False)
+        self.lora_bias = kwargs.get("lora_bias", "none")
 
     def save_checkpoint(
         self,
@@ -187,6 +190,20 @@ class Trainer:
         if self.use_deepspeed:
 
             logging.info(f"Save checkpoint: {epoch}, rank: {self.local_rank}\n")
+            if self.lora_save_only:
+                os.makedirs(self.output_dir, exist_ok=True)
+                lora_model = model.module if hasattr(model, "module") else model
+                lora_state = lora_state_dict(lora_model, bias=self.lora_bias)
+                if step is None:
+                    ckpt_name = f"lora.pt.ep{epoch}"
+                else:
+                    ckpt_name = f"lora.pt.ep{epoch}.{step}"
+                filename = os.path.join(self.output_dir, ckpt_name)
+                torch.save(lora_state, filename)
+                logging.info(f"\nLoRA checkpoint saved to {filename}\n")
+                latest = Path(os.path.join(self.output_dir, "lora.pt"))
+                torch.save(lora_state, latest)
+                return
             # self.step_or_epoch += 1
             state = {
                 "epoch": epoch,

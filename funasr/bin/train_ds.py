@@ -135,6 +135,8 @@ def main(**kwargs):
         use_fsdp=use_fsdp,
         device=kwargs["device"],
         excludes=kwargs.get("excludes", None),
+        lora_save_only=kwargs.get("lora_save_only", False),
+        lora_bias=kwargs.get("lora_bias", "none"),
         output_dir=kwargs.get("output_dir", "./exp"),
         **kwargs.get("train_conf"),
     )
