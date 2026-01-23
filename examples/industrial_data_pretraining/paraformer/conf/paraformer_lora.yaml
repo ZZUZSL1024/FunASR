@@ -2,13 +2,17 @@
 # You can override data paths and hyper-parameters by command-line ++key=value.
 
 # model hub name or local model dir
+
 model: paraformer-zh
+
 model_revision: master
 
 # LoRA settings
 lora_only: true
 lora_bias: none
+
 lora_save_only: true
+
 
 encoder_conf:
   lora_list: ["q", "k", "v", "o"]

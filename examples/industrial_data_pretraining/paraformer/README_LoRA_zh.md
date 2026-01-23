@@ -20,10 +20,12 @@ examples/industrial_data_pretraining/paraformer/conf/paraformer_lora.yaml
 ```
 
 关键字段说明：
+
 - `model`: 基座模型名称或本地模型路径（本示例使用 `paraformer-zh`）。
 - `lora_only`: 是否只训练 LoRA 参数。
 - `lora_bias`: LoRA 偏置训练策略（`none`/`all`/`lora_only`）。
 - `lora_save_only`: 仅保存 LoRA 权重（默认输出 `lora.pt`）。
+
 - `encoder_conf.lora_*` / `decoder_conf.lora_*`: LoRA 参数（rank/alpha/dropout）。
 - `train_data_set_list`/`valid_data_set_list`: 训练/验证集 jsonl。
 
@@ -51,13 +53,12 @@ val_data="${data_dir}/val.jsonl"
 bash examples/industrial_data_pretraining/paraformer/lora_finetune.sh
 ```
 
-> 注意：如果数据路径包含中文或特殊字符，请在命令行覆盖时加引号，或直接修改 `paraformer_lora.yaml` 中的 `train_data_set_list`/`valid_data_set_list`。脚本已默认对路径加引号，避免 Hydra 解析报错。
 
-训练日志与模型输出将保存在：
 
 ```
 examples/industrial_data_pretraining/paraformer/outputs_lora
 ```
+
 
 其中 LoRA-only 权重默认保存为：
 
@@ -72,7 +73,9 @@ examples/industrial_data_pretraining/paraformer/outputs_lora/lora.pt
 - Python 脚本：`examples/industrial_data_pretraining/paraformer/lora_infer.py`
 - Shell 封装：`examples/industrial_data_pretraining/paraformer/lora_infer.sh`
 
+
 `lora_infer.sh` 通过 `--config-path/--config-name` 加载训练输出的 `config.yaml`，`--model` 使用 `paraformer-zh`，并用 `--lora-only-ckpt` 加载训练得到的 `lora.pt`。
+
 
 修改 `lora_infer.sh` 中路径后运行：
 

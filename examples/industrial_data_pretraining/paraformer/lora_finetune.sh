@@ -40,7 +40,9 @@ torchrun ${DISTRIBUTED_ARGS} \
   funasr/bin/train_ds.py \
   --config-path "${config_path}" \
   --config-name "${config_name}" \
+
   ++train_data_set_list="'${train_data}'" \
   ++valid_data_set_list="'${val_data}'" \
+
   ++output_dir="${output_dir}" \
   &> "${log_file}"
