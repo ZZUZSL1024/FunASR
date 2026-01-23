@@ -6,6 +6,8 @@ import json
 import os
 from typing import List, Tuple
 
+import torch
+
 from omegaconf import OmegaConf
 
 from funasr import AutoModel
@@ -27,6 +29,15 @@ def load_jsonl(jsonl_path: str) -> Tuple[List[str], List[str]]:
     return keys, targets
 
 
+def load_lora_weights(model, lora_ckpt: str) -> None:
+    if not lora_ckpt:
+        return
+    lora_state = torch.load(lora_ckpt, map_location="cpu")
+    if isinstance(lora_state, dict) and "state_dict" in lora_state:
+        lora_state = lora_state["state_dict"]
+    model.model.load_state_dict(lora_state, strict=False)
+
+
 def build_model(args: argparse.Namespace):
     kwargs = {}
     if args.config_path and args.config_name:
@@ -40,7 +51,10 @@ def build_model(args: argparse.Namespace):
     kwargs["device"] = args.device
     if args.batch_size:
         kwargs["batch_size"] = args.batch_size
-    return AutoModel(**kwargs)
+    model = AutoModel(**kwargs)
+    if args.lora_only_ckpt:
+        load_lora_weights(model, args.lora_only_ckpt)
+    return model
 
 
 def main() -> None:
@@ -49,6 +63,12 @@ def main() -> None:
     parser.add_argument("--config-path", type=str, default=None, help="config directory")
     parser.add_argument("--config-name", type=str, default=None, help="config filename")
     parser.add_argument("--init-param", type=str, default=None, help="model checkpoint path")
+    parser.add_argument(
+        "--lora-only-ckpt",
+        type=str,
+        default=None,
+        help="LoRA-only checkpoint path (e.g., lora.pt)",
+    )
     parser.add_argument("--input-jsonl", type=str, required=True, help="input jsonl with source/target")
     parser.add_argument("--output-dir", type=str, required=True, help="output directory")
     parser.add_argument("--device", type=str, default="cuda:0", help="cuda:0 or cpu")

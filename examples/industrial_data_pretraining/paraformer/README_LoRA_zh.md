@@ -20,9 +20,10 @@ examples/industrial_data_pretraining/paraformer/conf/paraformer_lora.yaml
 ```
 
 关键字段说明：
-- `model`: 基座模型名称或本地模型路径。
+- `model`: 基座模型名称或本地模型路径（本示例使用 `paraformer-zh`）。
 - `lora_only`: 是否只训练 LoRA 参数。
 - `lora_bias`: LoRA 偏置训练策略（`none`/`all`/`lora_only`）。
+- `lora_save_only`: 仅保存 LoRA 权重（默认输出 `lora.pt`）。
 - `encoder_conf.lora_*` / `decoder_conf.lora_*`: LoRA 参数（rank/alpha/dropout）。
 - `train_data_set_list`/`valid_data_set_list`: 训练/验证集 jsonl。
 
@@ -58,6 +59,12 @@ bash examples/industrial_data_pretraining/paraformer/lora_finetune.sh
 examples/industrial_data_pretraining/paraformer/outputs_lora
 ```
 
+其中 LoRA-only 权重默认保存为：
+
+```
+examples/industrial_data_pretraining/paraformer/outputs_lora/lora.pt
+```
+
 ## 4. 推理脚本
 
 推理脚本会读取 jsonl 输入并生成 `text.hyp` / `text.ref`：
@@ -65,7 +72,7 @@ examples/industrial_data_pretraining/paraformer/outputs_lora
 - Python 脚本：`examples/industrial_data_pretraining/paraformer/lora_infer.py`
 - Shell 封装：`examples/industrial_data_pretraining/paraformer/lora_infer.sh`
 
-`lora_infer.sh` 通过 `--config-path/--config-name` 和 `--init-param` 加载训练输出的 `config.yaml` 与 `model.pt`，`--model` 固定为已注册的 `paraformer`。
+`lora_infer.sh` 通过 `--config-path/--config-name` 加载训练输出的 `config.yaml`，`--model` 使用 `paraformer-zh`，并用 `--lora-only-ckpt` 加载训练得到的 `lora.pt`。
 
 修改 `lora_infer.sh` 中路径后运行：
 
