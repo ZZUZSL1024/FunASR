@@ -321,6 +321,14 @@ def _generate_sync(model, audio_or_text, status_dict):
     return model.generate(input=audio_or_text, **status_dict)
 
 
+async def safe_send(websocket, data: str):
+    """Ensure websocket.send is not called concurrently per connection."""
+    if not hasattr(websocket, "send_lock"):
+        websocket.send_lock = asyncio.Lock()
+    async with websocket.send_lock:
+        await websocket.send(data)
+
+
 async def ws_reset(websocket):
     print("ws reset now, total num is ", len(websocket_users))
 
@@ -362,6 +370,7 @@ async def ws_serve(websocket, path=None):
     websocket.wav_name = "microphone"
     websocket.mode = "2pass"
     websocket.is_speaking = True  # ✅ 默认初始化，避免 AttributeError
+    websocket.send_lock = asyncio.Lock()  # 避免同一连接并发 send 造成 websockets 报错
 
     # 保存离线片段
     websocket.audio_fs = 16000
@@ -590,7 +599,7 @@ async def async_asr(websocket, audio_in: bytes):
             "wav_name": websocket.wav_name,
             "is_final": True,
         }
-        await websocket.send(json.dumps(message, ensure_ascii=False))
+        await safe_send(websocket, json.dumps(message, ensure_ascii=False))
         return
 
     # 1) ASR（阻塞，线程池执行）
@@ -664,7 +673,7 @@ async def async_asr(websocket, audio_in: bytes):
             message["punc_array"] = to_python(punc_array)
 
         try:
-            await websocket.send(json.dumps(message, ensure_ascii=False))
+            await safe_send(websocket, json.dumps(message, ensure_ascii=False))
         except Exception as e:
             print("send json failed:", e)
             print("message types:", {k: type(v) for k, v in message.items()})
@@ -677,7 +686,7 @@ async def async_asr(websocket, audio_in: bytes):
             "wav_name": websocket.wav_name,
             "is_final": True,
         }
-        await websocket.send(json.dumps(message, ensure_ascii=False))
+        await safe_send(websocket, json.dumps(message, ensure_ascii=False))
 
 
 async def async_asr_online(websocket, audio_in: bytes):
@@ -709,7 +718,7 @@ async def async_asr_online(websocket, audio_in: bytes):
                 websocket.status_dict_asr_online.get("is_final", False) or (not websocket.is_speaking)
             ),
         }
-        await websocket.send(json.dumps(message, ensure_ascii=False))
+        await safe_send(websocket, json.dumps(message, ensure_ascii=False))
 
 
 # ===================== 启动服务 =====================
